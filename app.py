@@ -9,9 +9,23 @@ import os
 import ssl
 from collections import defaultdict
 from dotenv import load_dotenv
+from flask_cors import CORS, cross_origin
+
 load_dotenv()
 
 app = Flask(__name__)
+cross_origin( 
+origins = '*', 
+methods = ['GET', 'HEAD', 'POST', 'OPTIONS', 'PUT'], 
+headers = None, 
+supports_credentials = False, 
+max_age = None, 
+send_wildcard = True, 
+always_send = True, 
+automatic_options = False
+)
+CORS(app)
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///project.db'  # replace with your database URI
 db = SQLAlchemy(app)
 api = Api(app)
@@ -119,6 +133,7 @@ class PredictionHistory(db.Model):
         return {c.name: getattr(self, c.name).isoformat() if isinstance(c.type, (Date, DateTime)) else getattr(self, c.name) for c in self.__table__.columns}
 
 class PatientListAPI(Resource):
+    @cross_origin()
     def get(self):
         patients = Patient.query.all()
         result = []
@@ -144,6 +159,7 @@ class PatientListAPI(Resource):
         # return result
         return {'patients': result}    
     
+    @cross_origin()
     def post(self):
         try:
             patient = Patient(**request.json)
