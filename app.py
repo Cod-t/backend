@@ -206,7 +206,7 @@ class PatientAPI(Resource):
     def delete(self, id):
         Patient.query.filter_by(id=id).delete()
         db.session.commit()
-        return {'sucess': 'Patient deleted successfully'}
+        return {'success': 'Patient deleted successfully'}
 
 class PatientPredictionHistoryAPI(Resource):
     def get(self, patient_id):
@@ -225,7 +225,7 @@ class PatientPredictionHistoryAPI(Resource):
     def delete(self, id):
         PredictionHistory.query.filter_by(id=id).delete()
         db.session.commit()
-        return {'result': 'success'}
+        return {'success': 'History deleted successfully'}
 
 
 class PatientCountAPI(Resource):
