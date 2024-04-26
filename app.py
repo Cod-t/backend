@@ -1,17 +1,82 @@
 from flask import Flask, request
 from flask_restful import Resource, Api
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import Date, DateTime
+from sqlalchemy import Date, DateTime,exc
 from datetime import date
-import joblib
+import urllib.request
+import json
+import os
+import ssl
+from collections import defaultdict
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///project.db'  # replace with your database URI
 db = SQLAlchemy(app)
 api = Api(app)
 
-model = joblib.load("model.pkl")
 
+def allowSelfSignedHttps(allowed):
+    # bypass the server certificate verification on client side
+    if allowed and not os.environ.get('PYTHONHTTPSVERIFY', '') and getattr(ssl, '_create_unverified_context', None):
+        ssl._create_default_https_context = ssl._create_unverified_context
+
+allowSelfSignedHttps(True) # this line is needed if you use self-signed certificate in your scoring service.
+
+def calculate_prediction(patient):
+    data =  {
+        "Inputs": {
+            "data": [
+            {
+                "Sex": patient.sex,
+                "Year.of.diagnosis": patient.year_of_diagnosis,
+                "Race.recode..W..B..AI..API.": patient.race_recode_W_B_AI_API,
+                "treatment": patient.treatment,
+                "Year.of.follow.up.recode": patient.year_of_follow_up_recode,
+                "Breast": patient.breast,
+                "Endocrine": patient.endocrine,
+                "Eye, and adnexa": patient.eye_and_adnexa,
+                "Gastrointestinal": patient.gastrointestinal,
+                "Gynecological": patient.gynecological,
+                "Head and Neck": patient.head_and_neck,
+                "hematopoietic": patient.hematopoietic,
+                "Male Genital": patient.male_genital,
+                "Musculoskeletal": patient.musculoskeletal,
+                "Nervous System": patient.nervous_system,
+                "Respiratory": patient.respiratory,
+                "Skin": patient.skin,
+                "Unspecified": patient.unspecified,
+                "Urinary": patient.urinary,
+                "Age": patient.age
+            }
+            ]
+        },
+        "GlobalParameters": {
+            # "method": "predict",
+            "method": "predict_proba"
+        }
+    }
+
+
+    # Make a prediction
+    body = str.encode(json.dumps(data))
+    url = 'http://5ab60f81-79a1-4dd1-be2b-500e0a07e324.eastus2.azurecontainer.io/score'
+    # Replace this with the primary/secondary key, AMLToken, or Microsoft Entra ID token for the endpoint
+    api_key = os.environ.get('API_KEY')
+    if not api_key:
+        raise Exception("A key should be provided to invoke the endpoint")
+    headers = {'Content-Type':'application/json', 'Authorization':('Bearer '+ api_key)}
+    req = urllib.request.Request(url, body, headers)
+
+
+
+    try:
+        response = urllib.request.urlopen(req)
+        result = json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        return {"fail":"failed to get prediction"}
+    return result
 
 class Patient(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -35,7 +100,6 @@ class Patient(db.Model):
     skin = db.Column(db.Boolean)
     unspecified = db.Column(db.Boolean)
     urinary = db.Column(db.Boolean)
-    cod_strokeYN = db.Column(db.Boolean)
     age = db.Column(db.Integer)
     
     def to_dict(self):
@@ -44,7 +108,8 @@ class Patient(db.Model):
 class PredictionHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'))
-    rate = db.Column(db.Float)
+    negative_rate = db.Column(db.Float)
+    positive_rate = db.Column(db.Float)
     entry_date = db.Column(db.Date)
 
     # Relationship
@@ -55,159 +120,128 @@ class PredictionHistory(db.Model):
 
 class PatientListAPI(Resource):
     def get(self):
-        # @TODO: add the prediction history for each patient to the response
         patients = Patient.query.all()
-        return {'patients': [patient.to_dict() for patient in patients]}    
+        result = []
+        for patient in patients:
+          
+            temp_dict = patient.to_dict()
+            patient_info = defaultdict(lambda: None, temp_dict)
+            history = PredictionHistory.query.filter_by(patient_id=patient.id).order_by(PredictionHistory.entry_date.desc()).first()
+
+
+            if history:
+                patient_info['negative'] =history.negative_rate
+                patient_info['positive'] = history.positive_rate
+            else:
+                patient_info['negative'] = None
+                patient_info['positive'] = None
+
+            result.append(patient_info)
+
+        # history = PredictionHistory.query.filter_by(patient_id=patient_id).all
+        # loop over each patient 
+        # add prediction to the dictionary
+        # return result
+        return {'patients': result}    
     
     def post(self):
-        patient = Patient(**request.json)
-        db.session.add(patient)
-        db.session.commit()
+        try:
+            patient = Patient(**request.json)
+            db.session.add(patient)
+            db.session.commit()
+        except exc.IntegrityError:
+            return {"error": "User already exists"}
 
+        return patient.to_dict()
+        
         # Prepare the data for prediction
-        data = [patient.age,
-                patient.sex,
-                patient.year_of_diagnosis,
-                patient.race_recode_W_B_AI_API,
-                patient.treatment,
-                patient.year_of_follow_up_recode,
-                patient.breast, patient.endocrine,
-                patient.eye_and_adnexa,
-                patient.gastrointestinal,
-                patient.gynecological,
-                patient.head_and_neck,
-                patient.hematopoietic,
-                patient.male_genital,
-                patient.musculoskeletal,
-                patient.nervous_system,
-                patient.respiratory,
-                patient.skin,
-                patient.unspecified,
-                patient.urinary,
-                patient.cod_strokeYN
-                ]
+        # @add a spearete logic for getting the prediction
+        # pos make the backend clean 
+        # neg require 2 apis calls in the frontend
 
-        # Make a prediction
-        prediction = model.predict([data])
-
+        # 
+        # result = calculate_prediction(patient)
         # Create a new PredictionHistory instance with the prediction
-        prediction_history = PredictionHistory(rate=prediction[0], patient=patient, entry_date=date.today())
-        db.session.add(prediction_history)
-        db.session.commit()
+        # prediction_history = PredictionHistory(negative_rate=result['Results'][0][0],positive_rate=result['Results'][0][1], patient=patient, entry_date=date.today())
+        # db.session.add(prediction_history)
+        # db.session.commit()
 
-        response = {'patient': patient.to_dict(), 'prediction': prediction_history.rate}
-        return response
-
+        # response = {'patient': patient.to_dict(), 'prediction': {
+        #     "negative":prediction_history.negative_rate,
+        #     "positive": prediction_history.positive_rate
+        #     }
+     
 
 class PatientAPI(Resource):
+    # Get patient by id
     def get(self, id):
-        # @TODO: add the prediction history to the response 
         patient = Patient.query.get(id)
-        return patient.to_dict()
+        if patient:
+            return patient.to_dict()
+        else:
+            return {"error": "Patient not found"}, 404
     
     def patch(self, id):
         body = request.json
         patient = Patient.query.get(id)
-        
-        if 'name' in body:
-            patient.name = body['name']
-        if 'sex' in body:
-            patient.sex = body['sex']
-        if 'year_of_diagnosis' in body:
-            patient.year_of_diagnosis = body['year_of_diagnosis']
-        if 'race_recode_W_B_AI_API' in body:
-            patient.race_recode_W_B_AI_API = body['race_recode_W_B_AI_API']
-        if 'treatment' in body:
-            patient.treatment = body['treatment']
-        if 'year_of_follow_up_recode' in body:
-            patient.year_of_follow_up_recode = body['year_of_follow_up_recode']
-        if 'breast' in body:
-            patient.breast = body['breast']
-        if 'endocrine' in body:
-            patient.endocrine = body['endocrine']
-        if 'eye_and_adnexa' in body:
-            patient.eye_and_adnexa = body['eye_and_adnexa']
-        if 'gastrointestinal' in body:
-            patient.gastrointestinal = body['gastrointestinal']
-        if 'gynecological' in body:
-            patient.gynecological = body['gynecological']
-        if 'head_and_neck' in body:
-            patient.head_and_neck = body['head_and_neck']
-        if 'hematopoietic' in body:
-            patient.hematopoietic = body['hematopoietic']
-        if 'male_genital' in body:
-            patient.male_genital = body['male_genital']
-        if 'musculoskeletal' in body:
-            patient.musculoskeletal = body['musculoskeletal']
-        if 'nervous_system' in body:
-            patient.nervous_system = body['nervous_system']
-        if 'respiratory' in body:
-            patient.respiratory = body['respiratory']
-        if 'skin' in body:
-            patient.skin = body['skin']
-        if 'unspecified' in body:
-            patient.unspecified = body['unspecified']
-        if 'urinary' in body:
-            patient.urinary = body['urinary']
-        if 'cod_strokeYN' in body:
-            patient.cod_strokeYN = body['cod_strokeYN']
-            
-            
+        # @TODO:clean the following if statements by adding all the keys in a list and iterate over it
+        keys = ['name', 'age', 'sex', 'year_of_diagnosis',
+         'race_recode_W_B_AI_API', 'treatment',
+          'year_of_follow_up_recode', 'breast',
+           'endocrine', 'eye_and_adnexa', 'gastrointestinal',
+            'gynecological', 'head_and_neck', 'hematopoietic', 'male_genital',
+             'musculoskeletal', 'nervous_system', 'respiratory', 'skin', 'unspecified',
+              'urinary']
+
+        for key in keys:
+            if key in body:
+                setattr(patient, key, body[key])
+
             
         # after this patient is updated in the database, we need to create a new prediction history for that patient
         # Create a new PredictionHistory instance with the updated patient data
-
-        data = [patient.age,
-                patient.sex,
-                patient.year_of_diagnosis,
-                patient.race_recode_W_B_AI_API,
-                patient.treatment,
-                patient.year_of_follow_up_recode,
-                patient.breast, patient.endocrine,
-                patient.eye_and_adnexa,
-                patient.gastrointestinal,
-                patient.gynecological,
-                patient.head_and_neck,
-                patient.hematopoietic,
-                patient.male_genital,
-                patient.musculoskeletal,
-                patient.nervous_system,
-                patient.respiratory,
-                patient.skin,
-                patient.unspecified,
-                patient.urinary,
-                patient.cod_strokeYN
-                ]
-        
-        prediction = model.predict([data])
-
-        prediction_history = PredictionHistory(rate=prediction[0], patient=patient, entry_date=date.today())
-        db.session.add(prediction_history)
         db.session.commit()
-
-        response = {'patient': patient.to_dict(), 'prediction': prediction_history.rate}
-        return response
+        return patient.to_dict()
 
     def delete(self, id):
         Patient.query.filter_by(id=id).delete()
         db.session.commit()
-        return {'result': 'success'}
+        return {'sucess': 'Patient deleted successfully'}
 
 class PatientPredictionHistoryAPI(Resource):
     def get(self, patient_id):
         history = PredictionHistory.query.filter_by(patient_id=patient_id).all()
         return {'history': [record.to_dict() for record in history]}
 
+    # calculate the prediction for the patient by id and add it to the history
+    def post(self, patient_id):
+        patient = Patient.query.filter_by(id=patient_id).first()
+        result = calculate_prediction(patient)
+        prediction_history = PredictionHistory(negative_rate=result['Results'][0][0],positive_rate=result['Results'][0][1], patient=patient, entry_date=date.today())
+        db.session.add(prediction_history)
+        db.session.commit()
+        return prediction_history.to_dict()
+
     def delete(self, id):
         PredictionHistory.query.filter_by(id=id).delete()
         db.session.commit()
         return {'result': 'success'}
 
+
+class PatientCountAPI(Resource):
+    def get(self):
+        count = Patient.query.count()
+        return {'count': count}
+
+
+api.add_resource(PatientCountAPI, '/patientCount', endpoint='patientCount')
 api.add_resource(PatientListAPI, '/patients', endpoint = 'patients')
 api.add_resource(PatientAPI, '/patient/<int:id>', endpoint = 'patient')
 api.add_resource(PatientPredictionHistoryAPI, '/patientHistorys/<int:patient_id>', '/patientHistory/<int:id>', endpoint = 'history')
 
-
+# /patients  POST return id from the response (frontend)
+# THEN
+# /patientHistorys/<int:patient_id> POST
 
 if __name__ == '__main__':
     app.run(port=5000)   
