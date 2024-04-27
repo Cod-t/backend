@@ -252,7 +252,7 @@ class PredictionHistoryCount(Resource):
     def get(self):
         count = PredictionHistory.query.count()
         return {"count":count}
-class 
+ 
 api.add_resource(PatientCountAPI, '/patientCount', endpoint='patientCount')
 api.add_resource(PatientListAPI, '/patients', endpoint = 'patients')
 api.add_resource(PatientAPI, '/patient/<int:id>', endpoint = 'patient')
