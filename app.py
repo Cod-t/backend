@@ -47,7 +47,6 @@ def calculate_prediction(patient):
                 "Year.of.diagnosis": patient.year_of_diagnosis,
                 "Race.recode..W..B..AI..API.": patient.race_recode_W_B_AI_API,
                 "treatment": patient.treatment,
-                "Year.of.follow.up.recode": patient.year_of_follow_up_recode,
                 "Breast": patient.breast,
                 "Endocrine": patient.endocrine,
                 "Eye, and adnexa": patient.eye_and_adnexa,
@@ -75,7 +74,7 @@ def calculate_prediction(patient):
 
     # Make a prediction
     body = str.encode(json.dumps(data))
-    url = 'http://5ab60f81-79a1-4dd1-be2b-500e0a07e324.eastus2.azurecontainer.io/score'
+    url = 'http://9b2d5ff9-574f-4535-92cb-6c10df375dc2.eastus2.azurecontainer.io/score'
     # Replace this with the primary/secondary key, AMLToken, or Microsoft Entra ID token for the endpoint
     api_key = os.environ.get('API_KEY')
     if not api_key:
