@@ -257,6 +257,7 @@ api.add_resource(PatientCountAPI, '/patientCount', endpoint='patientCount')
 api.add_resource(PatientListAPI, '/patients', endpoint = 'patients')
 api.add_resource(PatientAPI, '/patient/<int:id>', endpoint = 'patient')
 api.add_resource(PatientPredictionHistoryAPI, '/patientHistorys/<int:patient_id>', '/patientHistory/<int:id>', endpoint = 'history')
+api.add_resource(PredictionHistoryCount, '/patientHistoryCount', endpoint = 'patientHistoryCount')
 
 # /patients  POST return id from the response (frontend)
 # THEN
